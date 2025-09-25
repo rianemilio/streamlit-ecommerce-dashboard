@@ -1,35 +1,20 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import os
 from prophet import Prophet
-from prophet.plot import plot_plotly
+from style_config import CSS, PRIMARY_COLOR, SECONDARY_COLOR
 
-# --- TÍTULO DA PÁGINA ---
+# --- CONFIGURAÇÃO DA PÁGINA E CSS ---
 st.set_page_config(page_title="Previsão de Vendas", layout="wide")
 st.title("Previsão de Receita Futura")
-
-# --- CSS ---
-st.markdown(
-    """
-    <style>
-        .block-container {
-            padding-top: 2rem !important;
-            padding-bottom: 0rem;
-            padding-left: 2.5rem;
-            padding-right: 2.5rem;
-        }
-        div[data-testid="stMetric"] { padding-top: 0.1rem; padding-bottom: 0rem; }
-        .chart-title { font-size: 16px; font-weight: 600; text-align: center; margin-bottom: 0.1rem; }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
+st.markdown(CSS, unsafe_allow_html=True)
 
 
 # --- CARREGAMENTO DOS DADOS ---
 @st.cache_data
-def load_data():
+def load_forecast_data():
     data_path = "data/"
     try:
         cols_orders = ["order_id", "order_purchase_timestamp"]
@@ -45,20 +30,16 @@ def load_data():
             columns=cols_items,
             engine="fastparquet",
         )
-
     except Exception as e:
         st.error(f"Erro ao ler os arquivos Parquet. Detalhe: {e}")
         st.stop()
-
     df = orders.merge(items, on="order_id")
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     return df
 
 
 # --- LÓGICA PRINCIPAL ---
-df_forecast = load_data()
-
-# --- PREPARAÇÃO DOS DADOS PARA O MODELO ---
+df_forecast = load_forecast_data()
 df_prophet = df_forecast[["order_purchase_timestamp", "price"]].copy()
 df_prophet = (
     df_prophet.set_index("order_purchase_timestamp").resample("D").sum().reset_index()
@@ -68,7 +49,7 @@ df_prophet.rename(
 )
 
 # --- FILTROS NA BARRA LATERAL ---
-st.sidebar.header("Parâmetros da Previsão")
+st.sidebar.header("Parâmetros")
 prediction_period = st.sidebar.slider(
     "Horizonte de Previsão (Meses):",
     min_value=1,
@@ -76,20 +57,17 @@ prediction_period = st.sidebar.slider(
     value=3,
     key="prediction_period",
 )
-
-# --- LAYOUT DO DASHBOARD ---
 st.markdown(
     "Use o controle na barra lateral para definir quantos meses no futuro você deseja prever a receita."
 )
 
 if st.button("Gerar Previsão"):
-    with st.spinner("Treinando o modelo e gerando a previsão... Por favor, aguarde."):
+    with st.spinner("Treinando o modelo e gerando a previsão..."):
         # --- TREINAMENTO E PREVISÃO ---
         model = Prophet(
             yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False
         )
         model.fit(df_prophet)
-
         future = model.make_future_dataframe(periods=prediction_period * 30)
         forecast = model.predict(future)
 
@@ -100,7 +78,60 @@ if st.button("Gerar Previsão"):
             unsafe_allow_html=True,
         )
 
-        fig1 = plot_plotly(model, forecast)
+        df_plot = df_prophet.copy()
+        outlier_threshold = 100000
+        max_value_without_outlier = df_plot[df_plot["y"] < outlier_threshold]["y"].max()
+        has_outliers = (df_plot["y"] > outlier_threshold).any()
+        if has_outliers:
+            df_plot.loc[df_plot["y"] > outlier_threshold, "y"] = (
+                max_value_without_outlier
+            )
+            st.info(
+                "ℹ️ Um ou mais picos de vendas foram limitados visualmente para melhor clareza do gráfico."
+            )
+
+        fig1 = go.Figure()
+        fig1.add_trace(
+            go.Scatter(
+                x=df_plot["ds"],
+                y=df_plot["y"],
+                mode="lines",
+                name="Dados Reais",
+                line=dict(color=SECONDARY_COLOR, width=2),
+            )
+        )
+        fig1.add_trace(
+            go.Scatter(
+                x=forecast["ds"],
+                y=forecast["yhat"],
+                mode="lines",
+                name="Previsão",
+                line=dict(color=PRIMARY_COLOR, width=3, dash="dot"),
+            )
+        )
+        fig1.add_trace(
+            go.Scatter(
+                x=forecast["ds"],
+                y=forecast["yhat_upper"],
+                mode="lines",
+                line=dict(width=0),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+        fig1.add_trace(
+            go.Scatter(
+                x=forecast["ds"],
+                y=forecast["yhat_lower"],
+                mode="lines",
+                line=dict(width=0),
+                fillcolor="rgba(0, 104, 201, 0.2)",
+                fill="tonexty",
+                hoverinfo="skip",
+                showlegend=False,
+                name="Intervalo de Confiança",
+            )
+        )
 
         last_history_date = df_prophet["ds"].max()
         last_forecast_date = forecast["ds"].max()
@@ -112,14 +143,7 @@ if st.button("Gerar Previsão"):
             line_width=0,
             annotation_text="Previsão",
             annotation_position="top left",
-            annotation_font_size=14,
         )
-
-        for trace in fig1.data:
-            if trace.name == "yhat":
-                trace.name = "Previsão"
-            if trace.name == "y":
-                trace.name = "Dados Reais"
 
         fig1.update_layout(
             yaxis_title="Receita (R$)",
@@ -138,8 +162,13 @@ if st.button("Gerar Previsão"):
             "Estes gráficos mostram a tendência geral e as sazonalidades que o modelo aprendeu a partir dos dados."
         )
 
-        # --- Gráfico de Tendência (Trend) ---
-        fig_trend = px.line(forecast, x="ds", y="trend", title="Tendência Geral")
+        fig_trend = px.line(
+            forecast,
+            x="ds",
+            y="trend",
+            title="Tendência Geral",
+            color_discrete_sequence=[PRIMARY_COLOR],
+        )
         fig_trend.add_vrect(
             x0=last_history_date,
             x1=last_forecast_date,
@@ -154,8 +183,13 @@ if st.button("Gerar Previsão"):
         )
         st.plotly_chart(fig_trend, use_container_width=True)
 
-        # --- Gráfico de Sazonalidade Anual (Yearly) ---
-        fig_yearly = px.line(forecast, x="ds", y="yearly", title="Sazonalidade Anual")
+        fig_yearly = px.line(
+            forecast,
+            x="ds",
+            y="yearly",
+            title="Sazonalidade Anual",
+            color_discrete_sequence=[PRIMARY_COLOR],
+        )
         fig_yearly.add_vrect(
             x0=last_history_date,
             x1=last_forecast_date,
@@ -168,12 +202,10 @@ if st.button("Gerar Previsão"):
         )
         st.plotly_chart(fig_yearly, use_container_width=True)
 
-        # --- Gráfico de Sazonalidade Semanal (Weekly) ---
         weekly_data = pd.DataFrame(
             {"day_name": forecast["ds"].dt.day_name(), "value": forecast["weekly"]}
         )
         weekly_component = weekly_data.groupby("day_name")["value"].mean().reset_index()
-
         day_order_en = [
             "Sunday",
             "Monday",
@@ -192,22 +224,20 @@ if st.button("Gerar Previsão"):
             "Friday": "Sexta-feira",
             "Saturday": "Sábado",
         }
-
         weekly_component["day_name"] = pd.Categorical(
             weekly_component["day_name"], categories=day_order_en, ordered=True
         )
         weekly_component = weekly_component.sort_values("day_name")
-
         weekly_component["day_name"] = weekly_component["day_name"].map(
             day_name_translation
         )
-
         fig_weekly = px.line(
             weekly_component,
             x="day_name",
             y="value",
             title="Sazonalidade Semanal",
             markers=True,
+            color_discrete_sequence=[PRIMARY_COLOR],
         )
         fig_weekly.update_layout(
             yaxis_title="Impacto Sazonal",

@@ -1,11 +1,9 @@
 import streamlit as st
+from style_config import CSS
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(
-    page_title="Análise de E-commerce",
-    page_icon="🛍️",
-    layout="wide"
-)
+st.set_page_config(page_title="Análise de E-commerce", page_icon="🛍️", layout="wide")
+st.markdown(CSS, unsafe_allow_html=True)
 
 # --- PÁGINA INICIAL ---
 st.title("🛍️ Análise de Performance de E-commerce")
@@ -31,11 +29,8 @@ st.markdown(
 
     **Tecnologias Utilizadas:**
     - **Linguagem:** Python
-    - **Bibliotecas:** Streamlit, Pandas, Plotly
+    - **Bibliotecas:** Streamlit, Pandas, Plotly, Prophet
     - **Dados:** Olist E-commerce Dataset (disponível no Kaggle)
-
-    Este dashboard foi criado como um projeto de portfólio para demonstrar habilidades em análise de dados, 
-    visualização interativa e desenvolvimento de aplicações web com Python.
     """
 )
 
