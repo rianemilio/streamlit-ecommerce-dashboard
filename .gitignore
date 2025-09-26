@@ -1,4 +1,17 @@
-.venv
-__pycache__
+# Ignorar arquivos de dados brutos
+data/*.csv
 
+# Ignorar o ambiente virtual do Python
+venv/
+.venv/
+
+# Ignorar caches do Python
+__pycache__/
+*.pyc
+
+# Ignorar arquivos de cache e configuração de editores
+.streamlit/
+.idea/
+.vscode/
+*.swp
 
